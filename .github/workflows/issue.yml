@@ -1,0 +1,130 @@
+name: ISSUE
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  add-labels:
+    runs-on: ubuntu-latest
+    if: join(github.event.issue.labels) == ''
+    steps:
+      - name: Get current date
+        id: date
+        run: echo "::set-output name=date::$(date +'%Y-%m-%d')"
+      - name: Change Name
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'update-issue'
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          labels: pick
+          title: "[${{ steps.date.outputs.date }}] ${{ github.event.issue.title }}"
+
+  push-issue:
+    runs-on: ubuntu-latest
+    if: join(github.event.issue.labels) == ''
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git for long paths
+        run: git config --global core.longpaths true
+
+      - name: Checkout archive branch to archive directory
+        run: |
+          git fetch origin archive:archive 2>/dev/null || echo "Archive branch does not exist yet"
+          mkdir -p archive
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: ./install.sh
+
+      - name: Update Body and Generate Summary
+        run: python3 picker.py --push-issue ${{ github.event.issue.number }}
+        env:
+          FEISHU_KEY: ${{ secrets.FEISHU_KEY }}
+          PICKER_FEISHU_KEY: ${{ secrets.PICKER_FEISHU_KEY }}
+          WECOM_KEY: ${{ secrets.WECOM_KEY }}
+          DINGTALK_KEY: ${{ secrets.DINGTALK_KEY }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+          PICKER_DINGTALK_KEY: ${{ secrets.PICKER_DINGTALK_KEY }}
+          PICKER_DINGTALK_SECRET: ${{ secrets.PICKER_DINGTALK_SECRET }}
+          QQ_KEY: ${{ secrets.QQ_KEY }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          MAIL_KEY: ${{ secrets.MAIL_KEY }}
+          MAIL_RECEIVER: ${{ secrets.MAIL_RECEIVER }}
+          GH_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Generate AI Summary
+        run: python3 picker.py --summarize-issue ${{ github.event.issue.number }}
+        env:
+          GH_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FEISHU_KEY: ${{ secrets.FEISHU_KEY }}
+          PICKER_FEISHU_KEY: ${{ secrets.PICKER_FEISHU_KEY }}
+
+      - name: Commit article markdown to archive branch
+        run: |
+          git config --global user.email chainreactorbot@gmail.com
+          git config --global user.name chainreactorbot
+
+          # Get date variables
+          year=$(date +'%Y')
+          month=$(date +'%m')
+          day=$(date +'%d')
+
+          # Fetch archive branch
+          git fetch origin archive:archive 2>/dev/null || echo "Archive branch will be created"
+
+          # Create a worktree for archive branch
+          worktree_path="/tmp/archive_worktree_$$"
+          if git show-ref --verify --quiet refs/heads/archive; then
+            # Archive branch exists, create worktree from it with sparse-checkout
+            git worktree add --no-checkout "$worktree_path" archive
+            cd "$worktree_path"
+            git sparse-checkout set "archive/${year}/"
+            git checkout
+          else
+            # Create orphan branch
+            git worktree add --detach "$worktree_path"
+            cd "$worktree_path"
+            git checkout --orphan archive
+            git rm -rf . 2>/dev/null || true
+          fi
+
+          # Copy new files to worktree
+          if [ -d "/home/runner/work/picker/picker/archive/${year}/${month}/${day}" ]; then
+            mkdir -p "archive/${year}/${month}"
+            cp -r "/home/runner/work/picker/picker/archive/${year}/${month}/${day}" "archive/${year}/${month}/"
+          fi
+
+          # Commit and push
+          git add "archive/${year}/${month}/${day}/"
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "添加文章 markdown（Issue #${{ github.event.issue.number }}）"
+            git push origin archive
+          fi
+
+          # Cleanup
+          cd /home/runner/work/picker/picker
+          git worktree remove "$worktree_path" --force
+
+

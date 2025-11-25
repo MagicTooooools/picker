@@ -1,0 +1,7 @@
+requests
+feedparser
+colorama
+pyyaml
+pyrate-limiter
+listparser
+markitdown==0.1.3

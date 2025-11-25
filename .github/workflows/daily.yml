@@ -1,0 +1,119 @@
+# https://docs.github.com/cn/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Daily Push
+
+# 国际标准时间2点（北京时间10点）
+on:
+  schedule:
+    - cron: '55 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git for long paths
+        run: git config --global core.longpaths true
+
+      - name: Checkout archive branch to archive directory
+        run: |
+          git fetch origin archive:archive 2>/dev/null || echo "Archive branch does not exist yet"
+          mkdir -p archive
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: ./install.sh
+
+      - name: Push articles
+        env:
+          FEISHU_KEY: ${{ secrets.FEISHU_KEY }}
+          PICKER_FEISHU_KEY: ${{ secrets.PICKER_FEISHU_KEY }}
+          WECOM_KEY: ${{ secrets.WECOM_KEY }}
+          DINGTALK_KEY: ${{ secrets.DINGTALK_KEY }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+          PICKER_DINGTALK_KEY: ${{ secrets.PICKER_DINGTALK_KEY }}
+          PICKER_DINGTALK_SECRET: ${{ secrets.PICKER_DINGTALK_SECRET }}
+          QQ_KEY: ${{ secrets.QQ_KEY }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          MAIL_KEY: ${{ secrets.MAIL_KEY }}
+          MAIL_RECEIVER: ${{ secrets.MAIL_RECEIVER }}
+        run: python3 picker.py
+
+      - name: Issue
+        run: gh issue create --title "[每日信息流] `date +'%Y-%m-%d'`" -F today.md --label "daily"
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Commit to archive branch
+        run: |
+          git config --global user.email chainreactorbot@gmail.com
+          git config --global user.name chainreactorbot
+
+          # Get date variables
+          year=$(date -d yesterday +'%Y')
+          month=$(date -d yesterday +'%m')
+          day=$(date -d yesterday +'%d')
+
+          # Fetch archive branch
+          git fetch origin archive:archive 2>/dev/null || echo "Archive branch will be created"
+
+          # Create a worktree for archive branch
+          worktree_path="/tmp/archive_worktree_$$"
+          if git show-ref --verify --quiet refs/heads/archive; then
+            # Archive branch exists, create worktree from it with sparse-checkout
+            git worktree add --no-checkout "$worktree_path" archive
+            cd "$worktree_path"
+            git sparse-checkout set "archive/${year}/"
+            git checkout
+          else
+            # Create orphan branch
+            git worktree add --detach "$worktree_path"
+            cd "$worktree_path"
+            git checkout --orphan archive
+            git rm -rf . 2>/dev/null || true
+          fi
+
+          # Copy new files to worktree
+          if [ -d "/home/runner/work/picker/picker/archive/${year}/${month}/${day}" ]; then
+            mkdir -p "archive/${year}/${month}"
+            cp -r "/home/runner/work/picker/picker/archive/${year}/${month}/${day}" "archive/${year}/${month}/"
+          fi
+
+          # Commit and push
+          git add "archive/${year}/${month}/${day}/"
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "每日安全资讯（`date +'%Y-%m-%d'`）"
+            git push origin archive
+          fi
+
+          # Cleanup
+          cd /home/runner/work/picker/picker
+          git worktree remove "$worktree_path" --force
+
+      - name: Update today.md in main
+        run: |
+          git checkout -f main
+          git stash pop || true
+          git add today.md
+          git diff --staged --quiet || git commit -m "Update today.md"
+          git push origin main
