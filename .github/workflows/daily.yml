@@ -5,7 +5,7 @@ name: Daily Push
 # 国际标准时间2点（北京时间10点）
 on:
   schedule:
-    - cron: '55 1 * * *'
+    - cron: "55 1 * * *"
   workflow_dispatch:
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v3
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Cache pip
         uses: actions/cache@v4
@@ -64,8 +64,8 @@ jobs:
 
       - name: Commit to archive branch
         run: |
-          git config --global user.email chainreactorbot@gmail.com
-          git config --global user.name chainreactorbot
+          git config --global user.email lionacc@163.com
+          git config --global user.name khora
 
           # Get date variables
           year=$(date -d yesterday +'%Y')
