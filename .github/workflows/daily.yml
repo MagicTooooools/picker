@@ -2,6 +2,9 @@
 
 name: Daily Push
 
+permissions:
+  contents: write
+
 # 国际标准时间2点（北京时间10点）
 on:
   schedule:
